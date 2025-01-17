@@ -4,7 +4,11 @@ from torch.nn import functional as F
 
 
 # hyperparams
+
+# number of samples
 batch_size = 32
+
+# length of the samples
 block_size = 8
 
 max_iters = 3000
@@ -14,6 +18,7 @@ learning_rate = 1e-2
 # use gpu if available
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
+n_embd = 32
 
 torch.manual_seed(1337)
 
@@ -46,11 +51,18 @@ val_data = data[n:]
 def get_batch(split):
     # generate a small batch of data of inputs x and targets y
     data = train_data if split == 'train' else val_data
+
+    # generate batch_size(32) random numbers between 0 and len(data) - batch size(8), i.e. get 32 random indexes from 0 and len-batchsize(8)
     ix = torch.randint(len(data) - block_size, (batch_size,))
+
+    # get a 2d array of [idx to idx + block_size]
     x = torch.stack([data[i:i+block_size] for i in ix])
+
+    # get a 2d array of x+1, basically the result values
     y = torch.stack([data[i+1:i+block_size+1] for i in ix])
     x, y = x.to(device), y.to(device)
     return x,y
+
 
 @torch.no_grad()
 def estimate_loss():
@@ -69,17 +81,28 @@ def estimate_loss():
 
 class BigramLanguageModel(nn.Module):
 
-    def __init__(self, vocab_size):
+    def __init__(self):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+
+        # setup embedding table for relationships
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
+        self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
-
-        logits = self.token_embedding_table(idx)
+        B, T = idx.shape
+        
+        # get all the embeddings
+        tok_emb = self.token_embedding_table(idx) # (B,T,C)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=device)) # (T,C)
+        x = tok_emb + pos_emb # (B,T,C)
+        logits = self.lm_head(x) #(B,T,vocab_size)
+        
 
         if targets is None:
             loss = None
         else:
+            # get the Batch size, Time/block size and Channel/vocab_size
             B, T, C = logits.shape
             logits = logits.view(B*T, C)
             targets = targets.view(B*T)
@@ -97,7 +120,7 @@ class BigramLanguageModel(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
         return idx
 
-model = BigramLanguageModel(vocab_size)
+model = BigramLanguageModel()
 m = model.to(device)
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
